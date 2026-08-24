@@ -3,7 +3,10 @@ name: Schedule Spark Flow
 on:
   workflow_dispatch:
   schedule:
-    - cron: '7 16 * * *'
+    # 北京时间 9:00 / 14:00 / 20:00 = UTC 1:00 / 6:00 / 12:00
+    - cron: '0 1 * * *'
+    - cron: '0 6 * * *'
+    - cron: '0 12 * * *'
 
 # 最小权限：本工作流不需要写仓库
 permissions:
@@ -34,14 +37,19 @@ jobs:
           pip install -r requirements.txt
           playwright install chromium
 
-      # 只显式注入白名单变量：任务清单来自 vars，各账号 Cookie 来自 secrets。
-      # 不再把全部 vars/secrets 导出成 JSON/.env 后全量注入（避免无谓泄露面）。
+      # 只显式注入白名单变量：任务清单与各账号 Cookie 均来自 secrets。
       - name: Run task
         env:
-          TASKS: ${{ vars.TASKS }}
-          COOKIES_DYQIJ1ANHNPE: ${{ secrets.COOKIES_DYQIJ1ANHNPE }}
-          COOKIES_AONANANIDEGU: ${{ secrets.COOKIES_AONANANIDEGU }}
-          # 发送确认/表头确认的选择器（vars，需在真实登录页核实后配置；缺省则对应功能关闭）
+          MESSAGE_TEMPLATE: ${{ secrets.MESSAGE_TEMPLATE }}
+          HITOKOTO_TYPES: ${{ secrets.HITOKOTO_TYPES }}
+          MATCH_MODE: ${{ secrets.MATCH_MODE }}
+          BROWSER_TIMEOUT: ${{ secrets.BROWSER_TIMEOUT }}
+          FRIEND_LIST_WAIT_TIME: ${{ secrets.FRIEND_LIST_WAIT_TIME }}
+          TASK_RETRY_TIMES: ${{ secrets.TASK_RETRY_TIMES }}
+          LOG_LEVEL: ${{ secrets.LOG_LEVEL }}
+          TASKS: ${{ secrets.TASKS }}
+          COOKIES_87392064267: ${{ secrets.COOKIES_87392064267 }}
+          # 发送确认/表头确认的选择器（留空则对应功能关闭）
           OUTGOING_BUBBLE_SELECTOR: ${{ vars.OUTGOING_BUBBLE_SELECTOR }}
           FAILED_BUBBLE_SELECTOR: ${{ vars.FAILED_BUBBLE_SELECTOR }}
           CHAT_HEADER_TITLE_SELECTOR: ${{ vars.CHAT_HEADER_TITLE_SELECTOR }}
