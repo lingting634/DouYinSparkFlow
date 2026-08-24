@@ -6,7 +6,6 @@ from utils.config import DEBUG, get_environment, Environment
 
 PLAYWRIGHT_BROWSERS_PATH = "../chrome"
 
-
 def install_browser():
     """
     安装 Chromium 浏览器
@@ -21,12 +20,9 @@ def install_browser():
 def get_browser():
     """
     启动浏览器实例
-    :return: (playwright, browser) 或 (playwright, persistent_context)
-
-    本地 + 设置了 DOUYIN_PROFILE_PATH 时，复用「已人工登录的独立浏览器 profile」
-    （账号 2 的降级运行路径，见 docs/LOCAL_WINDOWS.md）。此时返回的第二个值是
-    persistent_context，而不是可 new_context() 的 browser 对象。
+    :return: 浏览器实例
     """
+
     headless = True
 
     env = get_environment()
@@ -42,29 +38,21 @@ def get_browser():
         )
 
     try:
+        # 启动浏览器（无头 + 隐藏自动化特征，降低被抖音风控识别的概率）
         playwright = sync_playwright().start()
-
-        # 本地降级运行：复用已人工登录的独立 profile（不绕过登录/短信，仅降低触发频率）
-        profile = ""
-        if env == Environment.LOCAL:
-            profile = os.getenv("DOUYIN_PROFILE_PATH", "").strip()
-        if profile:
-            launch_kwargs = {"headless": headless}
-            executable = os.getenv("DOUYIN_PROFILE_EXECUTABLE", "").strip()
-            if executable and os.path.exists(executable):
-                launch_kwargs["executable_path"] = executable
-            if not headless:
-                launch_kwargs["args"] = ["--start-maximized"]
-                launch_kwargs["no_viewport"] = True
-            context = playwright.chromium.launch_persistent_context(
-                profile, **launch_kwargs
-            )
-            return playwright, context
-
-        # 常规路径：GitHub Actions / 本地新开浏览器
-        browser = playwright.chromium.launch(headless=headless)
+        browser = playwright.chromium.launch(
+            headless=headless,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--disable-infobars",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--start-maximized",
+            ],
+        )
         return playwright, browser
     except Exception as e:
+        # 捕获浏览器启动错误
         if "Executable doesn't exist" in str(e) and env != Environment.GITHUBACTION:
             print("浏览器可执行文件不存在！")
             install_browser()
