@@ -1,0 +1,39 @@
+name: Keepalive
+
+# 保活机制：GitHub 官方会在仓库 60 天无活动时暂停 schedule 定时任务。
+# 本 workflow 每天向 dev 分支推送一个空 commit，保持仓库"活跃"，
+# 从而避免 DouYinSparkFlow 的每日定时任务被自动暂停。
+on:
+  schedule:
+    # 每天 UTC 8:00 = 北京时间 16:00（位于两次主任务之间，避免与主任务重叠）
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: douyin-keepalive
+  cancel-in-progress: false
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout dev
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+
+      - name: Push empty commit to keep repo active
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { execSync } = require('child_process');
+            execSync('git config user.name "keepalive-bot"');
+            execSync('git config user.email "keepalive-bot@users.noreply.github.com"');
+            execSync('git commit --allow-empty -m "chore: keepalive - $(date -u +%Y-%m-%dT%H:%M:%SZ)"');
+            execSync('git push origin dev');
+            console.log('保活空 commit 已推送');
