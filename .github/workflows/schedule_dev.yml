@@ -77,14 +77,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_NO: ${{ github.run_number }}
         run: |
-          set -u
-          OPEN_NO=$(gh issue list --repo "${{ github.repository }}" --state open --label spark-alert --limit 1 --json number --jq '.[0].number')
-          if [ -n "${OPEN_NO:-}" ]; then
-            gh issue comment "$OPEN_NO" --repo "${{ github.repository }}" --body "已恢复正常：run #${RUN_NO} 成功。"
-            gh issue close "$OPEN_NO" --repo "${{ github.repository }}"
+          OPEN_NO=$(gh issue list --repo "${{ github.repository }}" --state open --label spark-alert --limit 1 --json number -q '.[0].number' 2>/dev/null) || true
+          if [ -n "${OPEN_NO}" ]; then
+            gh issue comment "${OPEN_NO}" --repo "${{ github.repository }}" --body "已恢复正常：run #${RUN_NO} 成功。" && \
+            gh issue close "${OPEN_NO}" --repo "${{ github.repository }}"
           fi
+          echo "任务成功（run #${RUN_NO}）" >> "$GITHUB_STEP_SUMMARY"
 
-      # 失败时：自动创建/更新告警 Issue（GitHub 会发邮件通知，避免静默失败好几天）
+      # 失败时：写运行摘要 + （若仓库开启 Issues）开/更新告警 Issue，绝不静默
       - name: Alert on failure
         if: ${{ failure() }}
         continue-on-error: true
@@ -93,24 +93,25 @@ jobs:
           RUN_NO: ${{ github.run_number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          set -u
-          BODY=$(cat <<EOF
-          火花任务失败（run #${RUN_NO}）
+          set +e
+          {
+            echo "## 火花任务失败（run #${RUN_NO}）"
+            echo ""
+            echo "- 时间(UTC)：$(date -u '+%F %T')"
+            echo "- 运行日志：${RUN_URL}"
+            echo "- 最可能原因：抖音 Cookie 登录态失效。修复：在电脑浏览器登录抖音 -> Cookie-Editor 导出 Cookie -> 更新 Secret COOKIES_87392064267；或让助手运行 tools/login_and_export.py"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-          - 时间(UTC)：$(date -u '+%Y-%m-%d %H:%M:%S')
-          - 运行日志：${RUN_URL}
-
-          **最可能的原因：抖音 Cookie 登录态已失效。**
-          修复方法：在电脑浏览器登录抖音后，用 Cookie-Editor 重新导出 Cookie，
-          更新仓库 Secret \`COOKIES_87392064267\` 即可。
-
-          其他可能原因：抖音页面改版导致选择器失配 / 运行环境网络异常。
-          EOF
-          )
-          OPEN_NO=$(gh issue list --repo "${{ github.repository }}" --state open --label spark-alert --limit 1 --json number --jq '.[0].number')
-          if [ -n "${OPEN_NO:-}" ]; then
-            gh issue comment "$OPEN_NO" --repo "${{ github.repository }}" --body "$BODY"
+          BODY="火花任务失败（run #${RUN_NO}），时间(UTC)：$(date -u '+%F %T')。日志：${RUN_URL}。最可能原因：抖音 Cookie 登录态失效，需要重新导出 Cookie 并更新 Secret COOKIES_87392064267。"
+          OPEN_NO=$(gh issue list --repo "${{ github.repository }}" --state open --label spark-alert --limit 1 --json number -q '.[0].number' 2>/dev/null) || true
+          echo "已有未关闭告警 Issue: ${OPEN_NO:-无}"
+          if [ -n "${OPEN_NO}" ]; then
+            gh issue comment "${OPEN_NO}" --repo "${{ github.repository }}" --body "${BODY}" && echo "已追加告警评论"
           else
-            gh label create spark-alert --repo "${{ github.repository }}" --color D93F0B --description "火花任务失败告警" 2>/dev/null || true
-            gh issue create --repo "${{ github.repository }}" --title "火花任务失败：可能需要重新导出 Cookie" --label spark-alert --body "$BODY"
+            gh label create spark-alert --repo "${{ github.repository }}" --color D93F0B --description "火花任务失败告警" 2>/dev/null
+            if gh issue create --repo "${{ github.repository }}" --title "火花任务失败：可能需要重新导出 Cookie" --label spark-alert --body "${BODY}" 2>/dev/null; then
+              echo "已创建告警 Issue"
+            else
+              echo "仓库未开启 Issues 功能，跳过 Issue 告警（已写入运行摘要，另有每日 21:30 本机体检兜底）"
+            fi
           fi
