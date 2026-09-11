@@ -15,6 +15,8 @@ config = get_config()
 userData = get_userData()
 logger = setup_logger(level=config.get("logLevel", "Info"))
 userIDDict = {}
+# 运行期统计（用于在日志里给出可核对的发送结果）
+_stats = {"user_info": 0}
 
 CONVERSATION_ITEM_SELECTORS = [
     ".conversationConversationItemwrapper",
@@ -47,7 +49,10 @@ def handle_response(response: Response):
 
     try:
         json_data = response.json()
-        for item in json_data.get("data", []):
+        # 注意：该接口在未返回用户信息时会给出 data: null，必须用 or [] 兜底，
+        # 否则会出现大量 "NoneType' object is not iterable" 的无意义告警。
+        items = json_data.get("data") or []
+        for item in items:
             short_id = item.get("short_id")
             unique_id = item.get("unique_id")
             sec_uid = item.get("sec_uid", "")
@@ -60,6 +65,7 @@ def handle_response(response: Response):
                 nickname,
                 remark_name,
             ]
+            _stats["user_info"] += 1
     except Exception as e:
         tb = traceback.extract_tb(e.__traceback__)
         last = tb[-1]
@@ -202,7 +208,9 @@ def get_item_title(element):
         return ""
 
 
-def scroll_and_select_user(page, username, targets, list_selector):
+def scroll_and_select_user(page, username, targets, list_selector, stats=None):
+    stats = stats if stats is not None else {}
+    stats.setdefault("names", {})
     logger.debug(f"账号 {username} 开始查找目标好友列表")
     logger.debug(f"账号 {username} 目标好友列表: {targets}")
     found_targets = set()
@@ -234,11 +242,14 @@ def scroll_and_select_user(page, username, targets, list_selector):
                 logger.debug(f"账号 {username} 找到好友 {target_name}")
                 target_symbol = checkTargetName(target_name, targets)
                 if target_symbol:
+                    stats["names"][target_symbol] = target_name
                     element.click()
                     yield target_symbol
                     remaining_targets.discard(target_symbol)
                     if len(remaining_targets) == 0:
                         logger.debug(f"账号 {username} 所有目标好友均已找到，停止搜索")
+                        stats["scanned"] = len(found_targets)
+                        stats["remaining"] = set()
                         return
                     break
             except Exception:
@@ -257,6 +268,8 @@ def scroll_and_select_user(page, username, targets, list_selector):
                     logger.warning(
                         f"账号 {username} 搜索结束，仍有以下好友未找到: {remaining_targets}"
                     )
+                stats["scanned"] = len(found_targets)
+                stats["remaining"] = set(remaining_targets)
                 break
 
             try:
@@ -264,6 +277,8 @@ def scroll_and_select_user(page, username, targets, list_selector):
             except PlaywrightTimeoutError:
                 logger.error(f"账号 {username} 未找到滚动容器，退出")
                 dump_debug_artifacts(page, username, "scroll-container-not-found")
+                stats["scanned"] = len(found_targets)
+                stats["remaining"] = set(remaining_targets)
                 break
 
             if scrollable_element:
@@ -312,6 +327,7 @@ def do_user_task(browser, username, cookies, targets):
             """
         )
         page.on("response", handle_response)
+        _stats["user_info"] = 0
         context.add_cookies(cookies)
 
         retry_operation(
@@ -325,10 +341,25 @@ def do_user_task(browser, username, cookies, targets):
         )
 
         list_selector = wait_for_chat_ready(page, username)
-        logger.debug(f"账号 {username} 开始发送消息")
+        total_targets = len(targets)
+        logger.info(f"账号 {username} 目标好友 {total_targets} 位，开始发送")
+        stats = {}
+        sent = []
 
-        for target_symbol in scroll_and_select_user(page, username, targets, list_selector):
-            logger.debug(f"账号 {username} 已选中好友 {target_symbol} 发送消息")
+        for target_symbol in scroll_and_select_user(
+            page, username, targets, list_selector, stats
+        ):
+            name = stats.get("names", {}).get(target_symbol, "")
+            label = f"{name}({target_symbol})" if name else target_symbol
+
+            if config.get("dryRun"):
+                sent.append(target_symbol)
+                logger.info(
+                    f"账号 {username} [试运行] 已匹配 [{len(sent)}/{total_targets}] -> "
+                    f"{label}（未输入、未发送）"
+                )
+                continue
+
             _, chat_input = first_visible_locator(
                 page, CHAT_EDITOR_SELECTORS, timeout=config["browserTimeout"]
             )
@@ -342,10 +373,30 @@ def do_user_task(browser, username, cookies, targets):
                 chat_input.type(line)
                 if index != len(lines) - 1:
                     chat_input.press("Shift+Enter")
-            logger.debug(f"账号 {username} 准备发送消息给好友 {target_symbol}：\n\t{message}")
+            logger.debug(f"账号 {username} 准备发送消息给好友 {label}：\n\t{message}")
             chat_input.press("Enter")
-            logger.debug(f"账号 {username} 给好友 {target_symbol} 发送消息完成")
+            sent.append(target_symbol)
+            logger.info(
+                f"账号 {username} 已发送 [{len(sent)}/{total_targets}] -> {label}"
+            )
             time.sleep(2)
+
+        remaining = stats.get("remaining", set())
+        logger.info(
+            f"账号 {username} 任务汇总：聊天列表 {stats.get('scanned', '未知')} 位会话 / "
+            f"目标 {total_targets} 位 / 成功发送 {len(sent)} 位 / 未匹配 {len(remaining)} 位 / "
+            f"好友信息缓存 {len(userIDDict)} 条"
+        )
+        if remaining:
+            miss = [
+                f"{stats.get('names', {}).get(t, '')}({t})" if stats.get("names", {}).get(t) else str(t)
+                for t in remaining
+            ]
+            logger.warning(f"账号 {username} 未能发送的好友：{', '.join(miss)}")
+        if not sent:
+            logger.error(
+                f"账号 {username} 本次未成功发送任何好友，请检查 Cookie 是否失效、好友列表是否加载"
+            )
     finally:
         context.close()
 

@@ -54,6 +54,8 @@ def get_config():
         "friendListTimeout": int(os.getenv("FRIEND_LIST_WAIT_TIME", "2000")),  # 好友列表加载超时时间，单位毫秒
         "taskRetryTimes": int(os.getenv("TASK_RETRY_TIMES", "3")),  # 任务重试次数
         "logLevel": os.getenv("LOG_LEVEL", "DEBUG"),  # 日志级别
+        # 试运行（只匹配好友、只打印结果，绝不输入与发送任何内容）
+        "dryRun": os.getenv("DRY_RUN", "").strip().lower() in ("1", "true", "yes", "on"),
     }
 
     return config

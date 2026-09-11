@@ -23,7 +23,7 @@ def get_browser():
     :return: 浏览器实例
     """
 
-    headless = True
+    headless = os.getenv("HEADLESS", "true").strip().lower() not in ("0", "false", "no", "off")
 
     env = get_environment()
     if env == Environment.LOCAL:
