@@ -8,9 +8,10 @@ on:
     - cron: '0 6 * * *'
     - cron: '0 12 * * *'
 
-# 最小权限：本工作流不需要写仓库
+# 最小权限：只需要读仓库；额外给 issues:write 用于失败告警（Cookie 失效时自动开 Issue）
 permissions:
   contents: read
+  issues: write
 
 # 同一时间只跑一个实例，避免重复发送
 concurrency:
@@ -67,3 +68,49 @@ jobs:
             logs/**/*.txt
             logs/**/*.png
           if-no-files-found: ignore
+
+      # 成功时：若存在历史告警 Issue 则评论并关闭（说明已恢复）
+      - name: Close alert on success
+        if: ${{ success() }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_NO: ${{ github.run_number }}
+        run: |
+          set -u
+          OPEN_NO=$(gh issue list --repo "${{ github.repository }}" --state open --label spark-alert --limit 1 --json number --jq '.[0].number')
+          if [ -n "${OPEN_NO:-}" ]; then
+            gh issue comment "$OPEN_NO" --repo "${{ github.repository }}" --body "已恢复正常：run #${RUN_NO} 成功。"
+            gh issue close "$OPEN_NO" --repo "${{ github.repository }}"
+          fi
+
+      # 失败时：自动创建/更新告警 Issue（GitHub 会发邮件通知，避免静默失败好几天）
+      - name: Alert on failure
+        if: ${{ failure() }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_NO: ${{ github.run_number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -u
+          BODY=$(cat <<EOF
+          火花任务失败（run #${RUN_NO}）
+
+          - 时间(UTC)：$(date -u '+%Y-%m-%d %H:%M:%S')
+          - 运行日志：${RUN_URL}
+
+          **最可能的原因：抖音 Cookie 登录态已失效。**
+          修复方法：在电脑浏览器登录抖音后，用 Cookie-Editor 重新导出 Cookie，
+          更新仓库 Secret \`COOKIES_87392064267\` 即可。
+
+          其他可能原因：抖音页面改版导致选择器失配 / 运行环境网络异常。
+          EOF
+          )
+          OPEN_NO=$(gh issue list --repo "${{ github.repository }}" --state open --label spark-alert --limit 1 --json number --jq '.[0].number')
+          if [ -n "${OPEN_NO:-}" ]; then
+            gh issue comment "$OPEN_NO" --repo "${{ github.repository }}" --body "$BODY"
+          else
+            gh label create spark-alert --repo "${{ github.repository }}" --color D93F0B --description "火花任务失败告警" 2>/dev/null || true
+            gh issue create --repo "${{ github.repository }}" --title "火花任务失败：可能需要重新导出 Cookie" --label spark-alert --body "$BODY"
+          fi
