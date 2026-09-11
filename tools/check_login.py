@@ -83,6 +83,21 @@ def main():
             print(f"  页面加载告警（可忽略）：{str(e)[:80]}")
         time.sleep(10)
 
+        # 等待会话列表真正渲染出内容（骨架屏阶段截图是没有信息的）
+        deadline = time.time() + 40
+        rendered = False
+        while time.time() < deadline:
+            try:
+                if page.locator(LIST_SELECTORS[0]).count() > 0:
+                    txt = page.locator(LIST_SELECTORS[0]).first.inner_text(timeout=2000)
+                    if len(txt.strip()) > 10:
+                        rendered = True
+                        break
+            except Exception:
+                pass
+            time.sleep(2)
+        print(f"  会话列表是否已渲染出内容: {'是' if rendered else '否（可能仍在加载）'}", flush=True)
+
         hit = None
         for s in LIST_SELECTORS:
             try:
@@ -116,8 +131,15 @@ def main():
             print("\n结论：登录态【已失效】❌ 需要重新导出 Cookie（tools/login_and_export.py）")
             rc = 2
     finally:
-        browser.close()
-        p.stop()
+        try:
+            browser.close()
+        except Exception:
+            # 页面还在请求时 driver 可能已断开，收尾失败不影响体检结论
+            pass
+        try:
+            p.stop()
+        except Exception:
+            pass
     sys.exit(rc)
 
 
