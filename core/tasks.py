@@ -323,6 +323,20 @@ def read_editor_text(locator):
     return None
 
 
+# 抖音编辑器发完消息后常常残留不可见占位字符（零宽空格 / BOM / 不换行空格等），
+# 不能把它当成"消息没发出去"。
+INVISIBLE_CHARS = "\u200b\u200c\u200d\u2060\ufeff\u00a0\u180e\u3000"
+
+
+def clean_editor_text(text):
+    """过滤不可见占位字符，返回真正可见的残留文本。"""
+    if not text:
+        return ""
+    for ch in INVISIBLE_CHARS:
+        text = text.replace(ch, "")
+    return text.strip()
+
+
 def do_user_task(browser, username, cookies, targets):
     context = browser.new_context(
         user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
@@ -405,13 +419,15 @@ def do_user_task(browser, username, cookies, targets):
             chat_input.press("Enter")
             time.sleep(2)
 
-            # 关键校验：回车后输入框应当被清空。若还留着内容，说明这条根本没发出去
-            left = (read_editor_text(chat_input) or "").strip()
+            # 关键校验：回车后输入框应当被清空。若还留着「可见」内容，说明这条根本没发出去。
+            # 必须先过滤零宽字符等不可见占位符，否则会把成功的发送误报成「未确认」。
+            raw_left = read_editor_text(chat_input) or ""
+            left = clean_editor_text(raw_left)
             if left:
                 failed.append(target_symbol)
                 logger.warning(
                     f"账号 {username} 未确认发送 [{len(sent) + len(failed)}/{total_targets}] -> "
-                    f"{label}：回车后输入框仍有 {len(left)} 字，这条很可能没发出去"
+                    f"{label}：回车后输入框仍有 {len(left)} 字（原文：{left[:30]!r}），这条很可能没发出去"
                 )
             else:
                 sent.append(target_symbol)

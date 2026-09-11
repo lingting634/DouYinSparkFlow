@@ -97,11 +97,20 @@ def main():
             body = ""
         showed_login = any(w in body for w in LOGIN_WORDS)
 
+        # 留一张截图，方便核对会话列表里最后一条消息和时间（发送后核验用）
+        shot = os.path.join("logs", "debug", "check-login.png")
+        try:
+            os.makedirs(os.path.dirname(shot), exist_ok=True)
+            page.screenshot(path=shot, timeout=20000)
+            print(f"  已保存截图: {shot}")
+        except Exception as e:
+            print(f"  截图失败（可忽略）：{str(e)[:60]}")
+
         print(f"  URL: {page.url}")
         print(f"  聊天列表选择器命中: {hit or '未命中'}")
         print(f"  是否弹出登录框: {'是' if showed_login else '否'}")
         if hit and not showed_login:
-            print("\n结论：登录态【有效】✅ 可以走云端发送")
+            print("\n结论：登录态【有效】✅ 可以走本机通道发送（推荐；云端本月起会被风控作废登录态）")
             rc = 0
         else:
             print("\n结论：登录态【已失效】❌ 需要重新导出 Cookie（tools/login_and_export.py）")

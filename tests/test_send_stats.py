@@ -289,6 +289,32 @@ check("汇总确认发送 0 位", summary and "确认发送 0 位" in summary[0]
 check("汇总未确认 21 位", summary and "未确认 21 位" in summary[0], summary[0] if summary else "")
 
 print()
+print("【用例 6】回车后只剩不可见占位字符（零宽空格/不换行空格）-> 必须算发送成功")
+names, ids = setup_targets(21)
+page = FakePage(names)
+os.environ["DRY_RUN"] = ""
+reload_config()
+t.wait_for_chat_ready = lambda p, u: ".sel"
+t.first_visible_locator = lambda p, sels, timeout=0: (sels[0], FakeInput("\u200b\u00a0\u200b"))
+t.build_message = lambda: "[盖瑞]测试消息"
+lines = capture_logs(lambda: t.do_user_task(FakeBrowser(page), "测试号", [], ids))
+sent_lines = [l for l in lines if "已发送 [" in l]
+summary = [l for l in lines if "任务汇总" in l]
+check("21 条已发送记录", len(sent_lines) == 21, f"实际 {len(sent_lines)}")
+check("没有误报未确认", all("未确认发送 [" not in l for l in lines))
+check("汇总确认发送 21 位", summary and "确认发送 21 位" in summary[0], summary[0] if summary else "")
+
+print()
+print("【用例 7】可见残留 + 不可见字符混合 -> 仍必须报未确认")
+names, ids = setup_targets(21)
+page = FakePage(names)
+t.first_visible_locator = lambda p, sels, timeout=0: (sels[0], FakeInput("\u200b还没发出去\u00a0"))
+lines = capture_logs(lambda: t.do_user_task(FakeBrowser(page), "测试号", [], ids))
+stuck = [l for l in lines if "未确认发送 [" in l]
+check("21 条未确认记录", len(stuck) == 21, f"实际 {len(stuck)}")
+check("残留原文写进日志", stuck and "还没发出去" in stuck[0], stuck[0] if stuck else "")
+
+print()
 print("=" * 66)
 if FAILURES:
     print(f"结果：{len(FAILURES)} 项失败 -> {FAILURES}")
