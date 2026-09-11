@@ -124,11 +124,22 @@ class FakePage:
 
 
 class FakeInput:
+    """模拟输入框：默认回车后内容被清空（=成功发出）。"""
+
+    def __init__(self, leftover=""):
+        self.leftover = leftover
+
     def type(self, *a, **k):
         pass
 
     def press(self, *a, **k):
         pass
+
+    def inner_text(self, timeout=0):
+        return self.leftover
+
+    def input_value(self, timeout=0):
+        return self.leftover
 
 
 class FakeContext:
@@ -231,7 +242,7 @@ check("21 条发送记录", len(sent_lines) == 21, f"实际 {len(sent_lines)}")
 check("首条为 [1/21]", sent_lines and "[1/21]" in sent_lines[0], sent_lines[0] if sent_lines else "")
 check("末条为 [21/21]", sent_lines and "[21/21]" in sent_lines[-1], sent_lines[-1] if sent_lines else "")
 check("含汇总行", len(summary) == 1, str(summary))
-check("汇总显示成功 21 位", summary and "成功发送 21 位" in summary[0], summary[0] if summary else "")
+check("汇总显示确认发送 21 位", summary and "确认发送 21 位" in summary[0], summary[0] if summary else "")
 check("汇总显示未匹配 0 位", summary and "未匹配 0 位" in summary[0], summary[0] if summary else "")
 check("发送记录带好友昵称", sent_lines and names[0] in sent_lines[0], sent_lines[0] if sent_lines else "")
 
@@ -258,7 +269,24 @@ dry_lines = [l for l in lines if "[试运行]" in l]
 check("21 条试运行记录", len(dry_lines) == 21, f"实际 {len(dry_lines)}")
 check("未调用发送输入框", called["editor"] == 0, f"调用了 {called['editor']} 次")
 check("试运行不写入已发送标记", all("已发送 [" not in l for l in lines))
-check("汇总仍为 21", any("成功发送 21 位" in l for l in lines))
+check("汇总仍为 21", any("确认发送 21 位" in l for l in lines))
+
+print()
+print("【用例 5】回车后输入框仍有内容 -> 必须报未确认，不能算发送成功")
+names, ids = setup_targets(21)
+page = FakePage(names)
+os.environ["DRY_RUN"] = ""
+cfg = reload_config()
+t.wait_for_chat_ready = lambda p, u: ".sel"
+t.first_visible_locator = lambda p, sels, timeout=0: (sels[0], FakeInput("残留的一句消息"))
+t.build_message = lambda: "[盖瑞]测试消息"
+lines = capture_logs(lambda: t.do_user_task(FakeBrowser(page), "测试号", [], ids))
+stuck = [l for l in lines if "未确认发送 [" in l]
+summary = [l for l in lines if "任务汇总" in l]
+check("21 条未确认记录", len(stuck) == 21, f"实际 {len(stuck)}")
+check("没有误报已发送", all("已发送 [" not in l for l in lines))
+check("汇总确认发送 0 位", summary and "确认发送 0 位" in summary[0], summary[0] if summary else "")
+check("汇总未确认 21 位", summary and "未确认 21 位" in summary[0], summary[0] if summary else "")
 
 print()
 print("=" * 66)

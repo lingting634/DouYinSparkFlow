@@ -306,6 +306,23 @@ def scroll_and_select_user(page, username, targets, list_selector, stats=None):
                 time.sleep(1.5)
 
 
+def read_editor_text(locator):
+    """读取输入框当前内容（用来确认消息是否真的发出去了）。失败返回 None。"""
+    try:
+        val = locator.inner_text(timeout=2000)
+        if val is not None:
+            return val
+    except Exception:
+        pass
+    try:
+        val = locator.input_value(timeout=2000)
+        if val is not None:
+            return val
+    except Exception:
+        pass
+    return None
+
+
 def do_user_task(browser, username, cookies, targets):
     context = browser.new_context(
         user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
@@ -345,6 +362,7 @@ def do_user_task(browser, username, cookies, targets):
         logger.info(f"账号 {username} 目标好友 {total_targets} 位，开始发送")
         stats = {}
         sent = []
+        failed = []
 
         for target_symbol in scroll_and_select_user(
             page, username, targets, list_selector, stats
@@ -368,6 +386,16 @@ def do_user_task(browser, username, cookies, targets):
                 raise RuntimeError(f"账号 {username} 未找到聊天输入框")
 
             message = build_message()
+            if not sent and not failed:
+                logger.info(
+                    f"账号 {username} 消息样例：{message.replace(chr(10), ' / ')}"
+                )
+            # 先清空输入框，避免上一条残留内容被一起发出去
+            try:
+                chat_input.press("Control+a")
+                chat_input.press("Delete")
+            except Exception:
+                pass
             lines = message.replace("\\\\n", chr(10)).splitlines() or [message]
             for index, line in enumerate(lines):
                 chat_input.type(line)
@@ -375,18 +403,34 @@ def do_user_task(browser, username, cookies, targets):
                     chat_input.press("Shift+Enter")
             logger.debug(f"账号 {username} 准备发送消息给好友 {label}：\n\t{message}")
             chat_input.press("Enter")
-            sent.append(target_symbol)
-            logger.info(
-                f"账号 {username} 已发送 [{len(sent)}/{total_targets}] -> {label}"
-            )
             time.sleep(2)
+
+            # 关键校验：回车后输入框应当被清空。若还留着内容，说明这条根本没发出去
+            left = (read_editor_text(chat_input) or "").strip()
+            if left:
+                failed.append(target_symbol)
+                logger.warning(
+                    f"账号 {username} 未确认发送 [{len(sent) + len(failed)}/{total_targets}] -> "
+                    f"{label}：回车后输入框仍有 {len(left)} 字，这条很可能没发出去"
+                )
+            else:
+                sent.append(target_symbol)
+                logger.info(
+                    f"账号 {username} 已发送 [{len(sent)}/{total_targets}] -> {label}（输入框已清空）"
+                )
 
         remaining = stats.get("remaining", set())
         logger.info(
             f"账号 {username} 任务汇总：聊天列表 {stats.get('scanned', '未知')} 位会话 / "
-            f"目标 {total_targets} 位 / 成功发送 {len(sent)} 位 / 未匹配 {len(remaining)} 位 / "
-            f"好友信息缓存 {len(userIDDict)} 条"
+            f"目标 {total_targets} 位 / 确认发送 {len(sent)} 位 / 未确认 {len(failed)} 位 / "
+            f"未匹配 {len(remaining)} 位 / 好友信息缓存 {len(userIDDict)} 条"
         )
+        if failed:
+            miss = [
+                f"{stats.get('names', {}).get(t, '')}({t})" if stats.get("names", {}).get(t) else str(t)
+                for t in failed
+            ]
+            logger.error(f"账号 {username} 未确认发送成功的好友：{', '.join(miss)}")
         if remaining:
             miss = [
                 f"{stats.get('names', {}).get(t, '')}({t})" if stats.get("names", {}).get(t) else str(t)
