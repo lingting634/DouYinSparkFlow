@@ -337,6 +337,27 @@ def clean_editor_text(text):
     return text.strip()
 
 
+def send_message(chat_input, message):
+    """把消息输入编辑器并回车发送；返回回车后输入框的原始残留内容（交给调用方判定是否发出）。
+
+    自动回复（core/auto_reply.py）与本任务共用这一套发送逻辑，避免两处实现不一致。
+    """
+    # 先清空输入框，避免上一条残留内容被一起发出去
+    try:
+        chat_input.press("Control+a")
+        chat_input.press("Delete")
+    except Exception:
+        pass
+    lines = message.replace("\\\\n", chr(10)).splitlines() or [message]
+    for index, line in enumerate(lines):
+        chat_input.type(line)
+        if index != len(lines) - 1:
+            chat_input.press("Shift+Enter")
+    chat_input.press("Enter")
+    time.sleep(2)
+    return read_editor_text(chat_input) or ""
+
+
 def do_user_task(browser, username, cookies, targets):
     context = browser.new_context(
         user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
@@ -404,24 +425,11 @@ def do_user_task(browser, username, cookies, targets):
                 logger.info(
                     f"账号 {username} 消息样例：{message.replace(chr(10), ' / ')}"
                 )
-            # 先清空输入框，避免上一条残留内容被一起发出去
-            try:
-                chat_input.press("Control+a")
-                chat_input.press("Delete")
-            except Exception:
-                pass
-            lines = message.replace("\\\\n", chr(10)).splitlines() or [message]
-            for index, line in enumerate(lines):
-                chat_input.type(line)
-                if index != len(lines) - 1:
-                    chat_input.press("Shift+Enter")
             logger.debug(f"账号 {username} 准备发送消息给好友 {label}：\n\t{message}")
-            chat_input.press("Enter")
-            time.sleep(2)
+            raw_left = send_message(chat_input, message)
 
             # 关键校验：回车后输入框应当被清空。若还留着「可见」内容，说明这条根本没发出去。
             # 必须先过滤零宽字符等不可见占位符，否则会把成功的发送误报成「未确认」。
-            raw_left = read_editor_text(chat_input) or ""
             left = clean_editor_text(raw_left)
             if left:
                 failed.append(target_symbol)

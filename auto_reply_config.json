@@ -1,0 +1,177 @@
+{
+  "enabled": true,
+  "mode": "template",
+  "intervalSeconds": 480,
+  "activeHours": null,
+  "whitelist": [],
+  "blacklist": [],
+  "onlyKnownFriends": true,
+  "nameBlocklist": [
+    "群",
+    "粉丝团",
+    "官方",
+    "助手",
+    "通知",
+    "服务号"
+  ],
+  "scenes": {
+    "share": true,
+    "chat": true,
+    "question": true,
+    "sticker": true,
+    "call": false,
+    "group": false
+  },
+  "recentMinutes": 10,
+  "cooldownMinutes": 30,
+  "perFriendDailyLimit": 3,
+  "globalDailyLimit": 30,
+  "maxReplyChars": 30,
+  "noRepeatHours": 24,
+  "sensitiveWords": [
+    "转账",
+    "贷款",
+    "借款",
+    "刷单",
+    "兼职",
+    "博彩",
+    "赌",
+    "色情",
+    "裸",
+    "身份证",
+    "银行卡",
+    "验证码",
+    "密码",
+    "加微信",
+    "私聊我"
+  ],
+  "keywordRules": [
+    {
+      "keywords": [
+        "在吗",
+        "在么",
+        "在不在",
+        "在嘛"
+      ],
+      "replies": [
+        "在的 咋啦",
+        "在 你说",
+        "在呢"
+      ]
+    },
+    {
+      "keywords": [
+        "早",
+        "早上好",
+        "早安"
+      ],
+      "replies": [
+        "早啊",
+        "早 今天没课？",
+        "早呀"
+      ]
+    },
+    {
+      "keywords": [
+        "晚安",
+        "睡了",
+        "先睡"
+      ],
+      "replies": [
+        "晚安",
+        "睡吧 明天聊",
+        "晚安好梦"
+      ]
+    },
+    {
+      "keywords": [
+        "吃了吗",
+        "吃饭",
+        "吃啥"
+      ],
+      "replies": [
+        "刚吃完 你呢",
+        "还没 一会儿去",
+        "吃了吃了"
+      ]
+    },
+    {
+      "keywords": [
+        "哈哈",
+        "笑死",
+        "离谱",
+        "绝了"
+      ],
+      "replies": [
+        "哈哈哈哈",
+        "真的离谱",
+        "笑不活了"
+      ]
+    },
+    {
+      "keywords": [
+        "谢谢",
+        "多谢",
+        "感谢"
+      ],
+      "replies": [
+        "客气啥",
+        "小事儿",
+        "别谢"
+      ]
+    },
+    {
+      "keywords": [
+        "拜拜",
+        "再见",
+        "下了"
+      ],
+      "replies": [
+        "拜拜",
+        "回聊",
+        "行 那回头说"
+      ]
+    }
+  ],
+  "sceneTemplates": {
+    "share": [
+      "刚看完了 有点东西",
+      "这个我刷到过 确实好看",
+      "收藏了 回头细看",
+      "哈哈 你怎么刷到的"
+    ],
+    "chat": [
+      "嗯嗯",
+      "确实",
+      "哈哈是这样",
+      "可以啊",
+      "怎么了"
+    ],
+    "question": [
+      "我也不太确定 得查下",
+      "应该是吧",
+      "我想想 一会儿回你",
+      "这个我还真不知道"
+    ],
+    "sticker": [
+      "哈哈",
+      "笑死",
+      "行行行",
+      "咋啦"
+    ],
+    "fallback": [
+      "嗯嗯 在呢",
+      "看到了",
+      "回头细说"
+    ]
+  },
+  "llm": {
+    "enabled": false,
+    "baseUrl": "",
+    "apiKey": "",
+    "model": "",
+    "temperature": 0.8,
+    "timeoutSeconds": 20,
+    "systemPrompt": "你是抖音用户「讲七歌」本人（河南的大学生，说话口语、简短、有点幽默）。现在在回复好友的抖音私信，要求：只输出一条可以直接发出去的回复；2-15 个字为主；不用书面语、不加引号、不解释、不追问隐私；对方分享视频就顺着聊两句；不知道怎么接就简短应一声。"
+  }
+}
