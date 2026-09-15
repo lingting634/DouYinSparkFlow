@@ -1,7 +1,7 @@
 {
   "enabled": true,
   "mode": "template",
-  "intervalSeconds": 480,
+  "intervalSeconds": 300,
   "activeHours": null,
   "whitelist": [
     "奎奎",
@@ -48,9 +48,9 @@
     "group": false
   },
   "recentMinutes": 0,
-  "cooldownMinutes": 30,
-  "perFriendDailyLimit": 3,
-  "globalDailyLimit": 60,
+  "cooldownMinutes": 0,
+  "perFriendDailyLimit": 0,
+  "globalDailyLimit": 0,
   "maxReplyChars": 30,
   "noRepeatHours": 24,
   "sensitiveWords": [

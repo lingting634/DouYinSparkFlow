@@ -209,6 +209,23 @@ ok, why = ar.check_safety("敏感", "好友丙", "chat", "帮我转账款", c_al
 check("放开名单后敏感词照样拦", ok is False and "敏感词" in why, why)
 
 print()
+print("【用例 14】把冷却与条数上限设为 0 = 关闭限制（朋友一发消息就回）")
+c_off = cfg({"cooldownMinutes": 0, "perFriendDailyLimit": 0, "globalDailyLimit": 0})
+st = fresh_state()
+now = time.time()
+all_ok = True
+for i in range(5):
+    ok, why = ar.check_safety("fT", "好友T", "chat", "你好", c_off, st, now_ts=now + i)
+    all_ok = all_ok and ok
+    ar.mark_replied(st, "fT", "在的", now_ts=now + i)
+check("连续 5 次都不被冷却/上限拦", all_ok, f"最后一次：{why}")
+st["globalCount"] = 999
+ok, why = ar.check_safety("fU", "好友U", "chat", "你好", c_off, st, now_ts=now)
+check("全局计数很大也不拦", ok is True, why)
+ok, why = ar.check_safety("fV", "飞雪 初代 粉丝群", "group", "大家好", c_off, st, now_ts=now)
+check("关闭限制后群聊仍然不回", ok is False, why)
+
+print()
 print("=" * 66)
 if FAILURES:
     print(f"结果：{len(FAILURES)} 项失败 -> {FAILURES}")
