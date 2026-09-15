@@ -27,7 +27,7 @@
     "安安"
   ],
   "blacklist": [],
-  "onlyKnownFriends": false,
+  "onlyKnownFriends": true,
   "extraFriendIds": [
     "66467852015"
   ],

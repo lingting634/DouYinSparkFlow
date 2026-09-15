@@ -725,10 +725,16 @@ def scan_once(page, cfg, state, targets=None, inspect=False):
             candidates.append(c)
             logger.info(f"自动回复：本轮处理「{c['name']}」——{why}")
     if cfg.get("onlyKnownFriends", True):
+        white = cfg.get("whitelist") or []
+        extra = cfg.get("extraFriendIds") or []
         known = [n for n, v in userIDDict.items() if v and str(v[0]) in target_ids]
         logger.info(
-            f"自动回复：好友接口缓存 {len(userIDDict)} 个昵称，其中在你的 {len(target_ids)} 位目标名单里的有 {len(known)} 个"
-            f"（白名单另有 {len(cfg.get('whitelist') or [])} 个昵称）"
+            f"自动回复：授权范围 = 白名单 {len(white)} 位昵称 + 额外 ID {len(extra)} 个"
+            f"（共 {len(white) + len(extra)} 位好友）；本轮好友缓存里命中 {len(known)} 个"
+        )
+        logger.info(
+            "自动回复：授权好友名单：" + "、".join(str(x) for x in white)
+            + ("  +ID:" + "、".join(str(x) for x in extra) if extra else "")
         )
     # 把会话列表逐条打出来（排查「朋友发了消息但没回」时看这里）
     for c in convs[:12]:
