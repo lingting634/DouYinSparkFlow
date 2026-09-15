@@ -309,7 +309,10 @@ def check_safety(identity, friend_name, scene, text, cfg, state, now_ts=None, ta
     white = [str(x) for x in cfg.get("whitelist", [])]
     if name_matches(friend_name, black) or key in black:
         return False, "命中黑名单"
-    if white and not target_ok and not name_matches(friend_name, white) and key not in white:
+    # 只有开启「仅回复名单内好友」时，白名单才起限制作用；
+    # onlyKnownFriends=false 表示所有单聊好友都回（白名单/extraFriendIds 变成不再必要的备注）
+    if cfg.get("onlyKnownFriends", True) and white and not target_ok \
+            and not name_matches(friend_name, white) and key not in white:
         return False, "不在白名单内"
     for w in cfg.get("sensitiveWords", []):
         if w and w in (text or ""):

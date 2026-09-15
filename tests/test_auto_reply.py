@@ -196,6 +196,19 @@ check("未授权的人仍然被拦",
 ar.userIDDict.clear()
 
 print()
+print("【用例 13】放开名单限制：所有好友都能回（onlyKnownFriends=false）")
+c_all = cfg({"onlyKnownFriends": False, "whitelist": ["奎奎"]})
+ok, why = ar.check_safety("路人乙", "路人乙", "chat", "你好", c_all, fresh_state(), target_ok=False)
+check("非名单好友也放行", ok is True, why)
+c_lim = cfg({"onlyKnownFriends": True, "whitelist": ["奎奎"]})
+ok, why = ar.check_safety("路人乙", "路人乙", "chat", "你好", c_lim, fresh_state(), target_ok=False)
+check("仍然可以切回名单模式", ok is False and "白名单" in why, why)
+ok, why = ar.check_safety("群甲", "某某粉丝群", "group", "大家好", c_all, fresh_state(), target_ok=False)
+check("放开名单后群聊照样不回", ok is False, why)
+ok, why = ar.check_safety("敏感", "好友丙", "chat", "帮我转账款", c_all, fresh_state(), target_ok=False)
+check("放开名单后敏感词照样拦", ok is False and "敏感词" in why, why)
+
+print()
 print("=" * 66)
 if FAILURES:
     print(f"结果：{len(FAILURES)} 项失败 -> {FAILURES}")
