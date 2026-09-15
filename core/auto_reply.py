@@ -740,8 +740,8 @@ def scan_once(page, cfg, state, targets=None, inspect=False):
     for c in convs[:12]:
         logger.info(
             f"  会话[{c['index']}] {c['name']} | 未读 {c['unread']} | 时间「{c['time']}」 | "
-            f"预览「{(c['preview'] or '')[:24]}」 | 目标好友: "
-            f"{'是' if str((userIDDict.get(c['name']) or [''])[0]) in target_ids else '否'}"
+            f"预览「{(c['preview'] or '')[:24]}」 | 授权好友: "
+            f"{'是' if is_target_friend(c['name'], cfg, target_ids) else '否'}"
         )
     logger.info(
         f"自动回复：会话 {len(convs)} 个，其中未读 {len([c for c in convs if c['unread'] > 0])} 个，"
