@@ -44,7 +44,7 @@
     "call": false,
     "group": false
   },
-  "recentMinutes": 15,
+  "recentMinutes": 0,
   "cooldownMinutes": 30,
   "perFriendDailyLimit": 3,
   "globalDailyLimit": 30,
