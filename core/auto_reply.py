@@ -85,6 +85,10 @@ DEFAULT_CONFIG = {
     # readonly = 阶段1 只读识别；template = 阶段2 关键词+模板；llm = 阶段3 大模型
     "mode": "readonly",
     "intervalSeconds": 480,
+    # true = 浏览器常驻不关（回复更及时，间隔可小到 20 秒）；false = 每轮重开浏览器（更保守）
+    "reuseBrowser": True,
+    # 常驻模式下每多少轮整页刷新一次（保持页面状态新鲜）
+    "reloadEveryCycles": 30,
     # null = 全天候（任何时间段都能回）；也可写成 ["09:00", "23:00"]
     "activeHours": None,
     "whitelist": [],
@@ -829,8 +833,52 @@ def scan_once(page, cfg, state, targets=None, inspect=False):
     return stats
 
 
+UA_STR = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+          "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+
+
+def open_session(username, cookies):
+    """打开浏览器并进入已登录的聊天页；返回 (playwright, browser, context, page)。失败时自动清理。"""
+    playwright = browser = context = None
+    try:
+        playwright, browser = get_browser()
+        context = browser.new_context(
+            user_agent=UA_STR, locale="zh-CN", timezone_id="Asia/Shanghai",
+            viewport={"width": 1280, "height": 800},
+        )
+        context.add_cookies(cookies)
+        page = context.new_page()
+        page.add_init_script("Object.defineProperty(navigator,'webdriver',{get:()=>undefined});")
+        # 复用 tasks 的响应钩子：缓存「昵称 -> 短ID」，用于校验是否为目标好友
+        page.on("response", handle_response)
+        page.goto("https://www.douyin.com/chat", wait_until="domcontentloaded", timeout=60000)
+        wait_for_chat_ready(page, username)
+        wait_for_list_ready(page)
+        return playwright, browser, context, page
+    except Exception:
+        close_session(playwright, browser, context)
+        raise
+
+
+def close_session(playwright, browser, context):
+    """收尾（页面还有未完成请求时 driver 可能已断开，任何失败都忽略）。"""
+    for closer in (
+        lambda: context.close() if context else None,
+        lambda: browser.close() if browser else None,
+        lambda: playwright.stop() if playwright else None,
+    ):
+        try:
+            closer()
+        except Exception:
+            pass
+
+
 def run_auto_reply(mode=None, once=False, inspect=False):
-    """循环（默认全天候）执行自动回复；once=True 只跑一轮。"""
+    """循环执行自动回复。
+
+    - `reuseBrowser=true`（默认）：浏览器常驻不关，每 `intervalSeconds` 秒看一眼会话列表 → 回复很及时（可设到 20 秒）。
+    - `reuseBrowser=false`：每轮重开浏览器（更保守，但间隔不能太小，一般 8 分钟以上）。
+    """
     cfg = load_config()
     if mode:
         cfg["mode"] = mode
@@ -838,67 +886,70 @@ def run_auto_reply(mode=None, once=False, inspect=False):
     if not cfg.get("enabled"):
         logger.info("自动回复：总开关关闭，直接退出")
         return
+    reuse = bool(cfg.get("reuseBrowser", True))
+    interval = max(5, int(cfg.get("intervalSeconds", 300)))
+    reload_every = int(cfg.get("reloadEveryCycles", 30) or 0)
     logger.info(
-        f"自动回复启动：模式={cfg.get('mode')}，间隔={cfg.get('intervalSeconds')}s，"
+        f"自动回复启动：模式={cfg.get('mode')}，间隔={interval}s，"
+        f"浏览器={'常驻（更快）' if reuse else '每轮重开'}，"
         f"时段={'全天候' if not cfg.get('activeHours') else cfg.get('activeHours')}"
     )
     if cfg.get("mode") == "llm" and not (cfg.get("llm", {}) or {}).get("enabled"):
         logger.warning("自动回复：mode=llm 但 llm.enabled=false（或没填 baseUrl/apiKey），本轮会退回模板话术")
+    if len(userData) > 1:
+        logger.warning("自动回复：检测到多个账号，常驻浏览器模式只处理第一个账号")
 
+    session = None  # (playwright, browser, context, page, username, targets)
+    cycles = 0
     while True:
         if not in_active_hours(cfg):
             logger.info("自动回复：当前不在配置的时段内，等待下一轮")
         else:
-            playwright, browser = get_browser()
+            if session is None:
+                user = userData[0] if userData else None
+                if user is None:
+                    logger.error("自动回复：没有可用的账号配置（检查 .env 的 TASKS / COOKIES_*），退出")
+                    return
+                username = user.get("username", "未知用户")
+                try:
+                    pw, bw, ctx, page = open_session(username, user["cookies"])
+                except Exception as e:
+                    logger.error(f"自动回复：打开会话失败，稍后重试：{e}")
+                    if once:
+                        return
+                    time.sleep(max(30, interval))
+                    continue
+                session = (pw, bw, ctx, page, username, user["targets"])
+                cycles = 0
+            pw, bw, ctx, page, username, targets = session
             try:
-                for user in userData:
-                    cookies = user["cookies"]
-                    targets = user["targets"]
-                    username = user.get("username", "未知用户")
-                    context = browser.new_context(
-                        user_agent=(
-                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                            "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
-                        ),
-                        locale="zh-CN",
-                        timezone_id="Asia/Shanghai",
-                        viewport={"width": 1280, "height": 800},
-                    )
+                stats = scan_once(page, cfg, state, targets, inspect=inspect)
+                logger.info(
+                    f"自动回复[{username}] 本轮结束：会话 {stats['scanned']} 个 / "
+                    f"已回复 {stats['replied']} 位 / 跳过 {stats['skipped']} 位"
+                )
+                cycles += 1
+                if reload_every and cycles % reload_every == 0:
+                    logger.info(f"自动回复：已连续 {cycles} 轮，刷新页面保持状态新鲜")
                     try:
-                        context.add_cookies(cookies)
-                        page = context.new_page()
-                        page.add_init_script(
-                            "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
-                        )
-                        # 复用 tasks 的响应钩子：缓存「昵称 -> 短ID」，用于校验是否为目标好友
-                        page.on("response", handle_response)
                         page.goto("https://www.douyin.com/chat", wait_until="domcontentloaded",
                                   timeout=60000)
                         wait_for_chat_ready(page, username)
                         wait_for_list_ready(page)
-                        stats = scan_once(page, cfg, state, targets, inspect=inspect)
-                        logger.info(
-                            f"自动回复[{username}] 本轮结束：会话 {stats['scanned']} 个 / "
-                            f"已回复 {stats['replied']} 位 / 跳过 {stats['skipped']} 位"
-                        )
-                    finally:
-                        try:
-                            context.close()
-                        except Exception:
-                            pass
+                    except Exception as e:
+                        logger.warning(f"自动回复：刷新页面失败，下轮重开会话：{e}")
+                        close_session(pw, bw, ctx)
+                        session = None
             except Exception as e:
-                logger.error(f"自动回复本轮异常：{e}")
-            finally:
-                # 页面还有未完成请求时 driver 可能已断开，收尾失败不应影响下一轮
-                try:
-                    browser.close()
-                except Exception:
-                    pass
-                try:
-                    playwright.stop()
-                except Exception:
-                    pass
+                logger.error(f"自动回复本轮异常，将重开会话：{e}")
+                close_session(pw, bw, ctx)
+                session = None
+            if not reuse:
+                close_session(pw, bw, ctx)
+                session = None
         if once:
             logger.info("自动回复：--once 单轮结束")
+            if session:
+                close_session(session[0], session[1], session[2])
             return
-        time.sleep(max(30, int(cfg.get("intervalSeconds", 480))))
+        time.sleep(interval)

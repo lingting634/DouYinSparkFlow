@@ -1,7 +1,9 @@
 {
   "enabled": true,
   "mode": "template",
-  "intervalSeconds": 300,
+  "intervalSeconds": 20,
+  "reuseBrowser": true,
+  "reloadEveryCycles": 30,
   "activeHours": null,
   "whitelist": [
     "奎奎",
