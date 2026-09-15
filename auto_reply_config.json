@@ -3,7 +3,29 @@
   "mode": "template",
   "intervalSeconds": 480,
   "activeHours": null,
-  "whitelist": [],
+  "whitelist": [
+    "奎奎",
+    "岩岩",
+    "润润",
+    "武红军",
+    "枕风渡月",
+    "马晓旭",
+    "曹振友",
+    "殷明勋",
+    "麦志泽",
+    "陈梦冉",
+    "甘一恒",
+    "孟繁森",
+    "袁瑞",
+    "郭佳威",
+    "张文泽",
+    "行行",
+    "段义飞",
+    "孙浩楠",
+    "姚梓俊",
+    "张的行",
+    "安安"
+  ],
   "blacklist": [],
   "onlyKnownFriends": true,
   "nameBlocklist": [
@@ -22,7 +44,7 @@
     "call": false,
     "group": false
   },
-  "recentMinutes": 10,
+  "recentMinutes": 15,
   "cooldownMinutes": 30,
   "perFriendDailyLimit": 3,
   "globalDailyLimit": 30,
@@ -46,6 +68,22 @@
     "私聊我"
   ],
   "keywordRules": [
+    {
+      "keywords": [
+        "你好",
+        "您好",
+        "哈喽",
+        "嗨",
+        "hi",
+        "hello"
+      ],
+      "replies": [
+        "你好啊",
+        "哈喽 在的",
+        "你好你好",
+        "来了来了"
+      ]
+    },
     {
       "keywords": [
         "在吗",

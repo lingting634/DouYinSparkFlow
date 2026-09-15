@@ -333,6 +333,63 @@ def mark_replied(state, identity, reply, now_ts=None):
     state.setdefault("lastReplies", {})[key] = {"text": reply, "ts": now_ts}
 
 
+def mark_handled(state, name, preview):
+    """记下「这条消息已经处理过」，避免同一句话被反复回复（上限 200 条）。"""
+    keys = state.setdefault("handledKeys", [])
+    keys.append(f"{name}|{(preview or '')[:40]}")
+    state["handledKeys"] = keys[-200:]
+
+
+def name_matches(name, name_list):
+    """昵称是否命中名单：完全相同，或一方包含另一方（处理「孙浩楠（保定）」这类带后缀的备注名）。"""
+    name = (name or "").strip()
+    for item in name_list or []:
+        item = str(item).strip()
+        if not item:
+            continue
+        if name == item:
+            return True
+        if len(item) >= 2 and (item in name or (name and name in item)):
+            return True
+    return False
+
+
+def is_target_friend(name, cfg, target_ids):
+    """判断是不是「我要自动回复的好友」：白名单 或 抖音好友接口缓存里的目标短ID。"""
+    if name_matches(name, cfg.get("whitelist")):
+        return True
+    info = userIDDict.get(name)
+    if info and str(info[0]) in target_ids:
+        return True
+    return False
+
+
+def is_candidate(conv, cfg, state, ours, target_ids):
+    """挑出本轮要处理的会话。
+
+    两种情况都算：
+    1) 有未读角标（最标准）；
+    2) 没有未读角标、但最后一条**不是我们发的**、且是最近 N 分钟内的——因为用户可能在手机上
+       点开过导致未读被清掉（2026-09-15 奎奎就是这么被漏掉的）。
+    """
+    name = conv.get("name") or ""
+    if conv.get("unread", 0) > 0:
+        return True, "有未读角标"
+    if not is_target_friend(name, cfg, target_ids):
+        return False, "非目标好友"
+    if not is_recent(conv.get("time"), cfg.get("recentMinutes")):
+        return False, f"最后一条是「{conv.get('time')}」，超过 {cfg.get('recentMinutes')} 分钟"
+    preview = (conv.get("preview") or "").strip()
+    if not preview:
+        return False, "没有预览内容"
+    for o in ours:
+        if o and (o in preview or preview in o):
+            return False, "最后一条是我们自己发的"
+    if f"{name}|{preview[:40]}" in (state.get("handledKeys") or []):
+        return False, "这条消息已经处理过了"
+    return True, "最近的新消息（无未读角标）"
+
+
 # --------------------------------------------------------------------------- 生成回复
 
 
@@ -604,6 +661,27 @@ def our_recent_texts(targets=None, limit=3):
 # --------------------------------------------------------------------------- 主流程
 
 
+def wait_for_list_ready(page, timeout=30):
+    """等会话列表的昵称真正加载出来（没加载完时标题是一串数字 ID，读了会误判）。"""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            items = page.locator("[data-e2e='conversation-item']").all()
+        except Exception:
+            items = []
+        names = []
+        for it in items[:5]:
+            try:
+                names.append(it.locator(".conversationConversationItemtitle").first.inner_text(timeout=1200).strip())
+            except Exception:
+                names.append("")
+        if any(n and not n.isdigit() for n in names):
+            return True
+        time.sleep(1.5)
+    logger.warning("自动回复：会话昵称等了 30 秒还没加载出来（可能是登录态异常或网络慢）")
+    return False
+
+
 def scan_once(page, cfg, state, targets=None, inspect=False):
     """跑一轮：读列表 -> 找有未读的会话 -> 打开 -> 识别 -> （按需）回复。"""
     targets = targets if targets is not None else []
@@ -615,13 +693,24 @@ def scan_once(page, cfg, state, targets=None, inspect=False):
         logger.warning("自动回复：读不到会话列表（可能登录态失效或前端改版）")
         return {"scanned": 0, "replied": 0}
 
-    candidates = [c for c in convs if c["unread"] > 0]
-    if not candidates:
-        candidates = [c for c in convs if c["name"] in cfg.get("whitelist", [])]
+    candidates = []
+    for c in convs:
+        ok, why = is_candidate(c, cfg, state, ours, target_ids)
+        if ok:
+            candidates.append(c)
+            logger.info(f"自动回复：本轮处理「{c['name']}」——{why}")
     if cfg.get("onlyKnownFriends", True):
         known = [n for n, v in userIDDict.items() if v and str(v[0]) in target_ids]
         logger.info(
             f"自动回复：好友接口缓存 {len(userIDDict)} 个昵称，其中在你的 {len(target_ids)} 位目标名单里的有 {len(known)} 个"
+            f"（白名单另有 {len(cfg.get('whitelist') or [])} 个昵称）"
+        )
+    # 把会话列表逐条打出来（排查「朋友发了消息但没回」时看这里）
+    for c in convs[:12]:
+        logger.info(
+            f"  会话[{c['index']}] {c['name']} | 未读 {c['unread']} | 时间「{c['time']}」 | "
+            f"预览「{(c['preview'] or '')[:24]}」 | 目标好友: "
+            f"{'是' if str((userIDDict.get(c['name']) or [''])[0]) in target_ids else '否'}"
         )
     logger.info(
         f"自动回复：会话 {len(convs)} 个，其中未读 {len([c for c in convs if c['unread'] > 0])} 个，"
@@ -631,30 +720,22 @@ def scan_once(page, cfg, state, targets=None, inspect=False):
     stats = {"scanned": len(convs), "replied": 0, "skipped": 0}
     for conv in candidates:
         name = conv["name"]
-        try:
-            conv["item"].click()
-            time.sleep(1.5)
-        except Exception as e:
-            logger.warning(f"自动回复：打开会话「{name}」失败：{e}")
-            continue
-        messages = read_last_messages(page)
-        incoming = pick_incoming(messages, ours)
-        if not incoming:
-            logger.debug(f"自动回复：「{name}」没找到对方的新消息，跳过")
-            stats["skipped"] += 1
-            continue
-        text = incoming["text"]
-        scene = classify_scene(text, incoming.get("has_link"), incoming.get("is_sticker"), conv_name=name)
+        # 直接用会话列表的预览判断对方说了什么（比解析消息气泡稳得多，气泡 DOM 常读不到）
+        text = (conv.get("preview") or "").strip()
+        has_link = any(k in text for k in ("分享", "视频", "作品", "直播", "http"))
+        is_sticker = bool(text) and len(text) <= 4 and all(not ch.isalnum() for ch in text)
+        scene = classify_scene(text, has_link, is_sticker, conv_name=name)
         identity = name
-        if cfg.get("onlyKnownFriends", True):
-            info = userIDDict.get(name)
-            sid = str(info[0]) if info and info[0] else ""
-            if sid not in target_ids:
-                logger.info(f"自动回复：跳过「{name}」——不在你的目标好友名单里")
-                record_history({"friend": name, "scene": scene, "incoming": text[:80],
-                                "action": "skip", "reason": "非目标好友"})
-                stats["skipped"] += 1
-                continue
+        if cfg.get("onlyKnownFriends", True) and not is_target_friend(name, cfg, target_ids):
+            logger.info(f"自动回复：跳过「{name}」——不在目标好友名单里（把昵称加进 whitelist 即可）")
+            record_history({"friend": name, "scene": scene, "incoming": text[:80],
+                            "action": "skip", "reason": "非目标好友"})
+            stats["skipped"] += 1
+            mark_handled(state, name, text)
+            save_state(state)
+            continue
+        # 标记这条已处理，避免同一句话下一轮又被重复判断
+        mark_handled(state, name, text)
         ok, reason = check_safety(identity, name, scene, text, cfg, state)
         if ok and not is_recent(conv.get("time"), cfg.get("recentMinutes")):
             ok, reason = False, f"最近一条消息是「{conv.get('time')}」，超过 {cfg.get('recentMinutes')} 分钟，不翻旧账"
@@ -663,13 +744,15 @@ def scan_once(page, cfg, state, targets=None, inspect=False):
             record_history({"friend": name, "scene": scene, "incoming": text[:80],
                             "action": "skip", "reason": reason})
             stats["skipped"] += 1
+            save_state(state)
             continue
         if cfg.get("mode") == "readonly":
-            preview = build_reply(scene, cfg, identity, name, text, state)
-            logger.info(f"自动回复[只读]：「{name}」{scene} 场景，对方说「{text[:30]}」，拟回复「{preview}」")
+            plan = build_reply(scene, cfg, identity, name, text, state)
+            logger.info(f"自动回复[只读]：「{name}」{scene} 场景，对方说「{text[:30]}」，拟回复「{plan}」")
             record_history({"friend": name, "scene": scene, "incoming": text[:80],
-                            "action": "readonly", "plan": preview})
+                            "action": "readonly", "plan": plan})
             stats["skipped"] += 1
+            save_state(state)
             continue
         reply = build_reply(scene, cfg, identity, name, text, state)
         if not reply:
@@ -677,8 +760,16 @@ def scan_once(page, cfg, state, targets=None, inspect=False):
             record_history({"friend": name, "scene": scene, "incoming": text[:80],
                             "action": "skip", "reason": "无可用话术"})
             stats["skipped"] += 1
+            save_state(state)
             continue
-        _, editor = first_visible_locator(page, CHAT_EDITOR_SELECTORS, timeout=8000)
+        # 只有真要发消息时才点开会话（避免把消息无意义地标成已读）
+        try:
+            conv["item"].click()
+            time.sleep(2.0)
+        except Exception as e:
+            logger.warning(f"自动回复：打开会话「{name}」失败：{e}")
+            continue
+        _, editor = first_visible_locator(page, CHAT_EDITOR_SELECTORS, timeout=10000)
         if editor is None:
             dump_debug_artifacts(page, "auto-reply", "chat-editor-not-found")
             logger.warning(f"自动回复：找不到输入框（{name}），本轮跳过")
@@ -749,6 +840,7 @@ def run_auto_reply(mode=None, once=False, inspect=False):
                         page.goto("https://www.douyin.com/chat", wait_until="domcontentloaded",
                                   timeout=60000)
                         wait_for_chat_ready(page, username)
+                        wait_for_list_ready(page)
                         stats = scan_once(page, cfg, state, targets, inspect=inspect)
                         logger.info(
                             f"自动回复[{username}] 本轮结束：会话 {stats['scanned']} 个 / "
