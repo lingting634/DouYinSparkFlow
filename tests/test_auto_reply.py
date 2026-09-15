@@ -184,6 +184,18 @@ ours = ar.our_recent_texts()
 check("固定标记含自己的火花消息", "[盖瑞]今日火花" in ours and "[续火花]" in ours, str(sorted(ours))[:60])
 
 print()
+print("【用例 12】按 ID 授权好友（extraFriendIds）")
+ar.userIDDict.clear()
+ar.userIDDict["新朋友"] = ["66467852015", "dy_newfriend", "MS4wLjABAAAAsec", "新朋友", "新朋友"]
+c_id = cfg({"whitelist": ["奎奎"], "extraFriendIds": ["66467852015"]})
+check("ID 命中 -> 是授权好友", ar.is_target_friend("新朋友", c_id, {"1001", "1002"}) is True, "")
+ok, why = ar.check_safety("新朋友", "新朋友", "chat", "你好", c_id, fresh_state(), target_ok=True)
+check("按 ID 授权后不被白名单二次拦截", ok is True, why)
+check("未授权的人仍然被拦",
+      ar.is_target_friend("路人甲", c_id, {"1001"}) is False, "")
+ar.userIDDict.clear()
+
+print()
 print("=" * 66)
 if FAILURES:
     print(f"结果：{len(FAILURES)} 项失败 -> {FAILURES}")

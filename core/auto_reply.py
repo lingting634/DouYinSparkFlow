@@ -92,6 +92,8 @@ DEFAULT_CONFIG = {
     # 只回复「账号好友列表里的 21 位目标好友」（用抖音 IM 接口缓存的名字->短ID 校验）；
     # 设成 false 表示所有单聊都会自动回复（不推荐）。
     "onlyKnownFriends": True,
+    # 额外授权的好友 ID（抖音号/短ID）：即使不在续火花名单、昵称也不在白名单里，也允许自动回复
+    "extraFriendIds": [],
     # 会话名里含这些字样一律不回（群聊/官方号/系统通知）
     "nameBlocklist": ["群", "粉丝团", "官方", "助手", "通知", "服务号"],
     "scenes": {
@@ -286,8 +288,12 @@ def is_recent(conv_time, recent_minutes, now=None):
 # --------------------------------------------------------------------------- 安全阀
 
 
-def check_safety(identity, friend_name, scene, text, cfg, state, now_ts=None):
-    """返回 (是否允许回复, 原因)。任何一个安全阀不过就只记日志、不发送。"""
+def check_safety(identity, friend_name, scene, text, cfg, state, now_ts=None, target_ok=False):
+    """返回 (是否允许回复, 原因)。任何一个安全阀不过就只记日志、不发送。
+
+    target_ok=True 表示调用方已经确认过「这是授权好友」（白名单昵称 / 目标短ID / extraFriendIds），
+    此时不再用白名单昵称二次拦截（否则按 ID 授权的好友会被误拦）。
+    """
     now_ts = now_ts if now_ts is not None else time.time()
     roll_day(state)
     if not cfg.get("enabled"):
@@ -303,7 +309,7 @@ def check_safety(identity, friend_name, scene, text, cfg, state, now_ts=None):
     white = [str(x) for x in cfg.get("whitelist", [])]
     if name_matches(friend_name, black) or key in black:
         return False, "命中黑名单"
-    if white and not name_matches(friend_name, white) and key not in white:
+    if white and not target_ok and not name_matches(friend_name, white) and key not in white:
         return False, "不在白名单内"
     for w in cfg.get("sensitiveWords", []):
         if w and w in (text or ""):
@@ -354,12 +360,23 @@ def name_matches(name, name_list):
     return False
 
 
+def friend_ids(name):
+    """取抖音好友接口缓存里这个名字对应的所有 ID（短ID / 抖音号 / sec_uid）。"""
+    info = userIDDict.get(name)
+    if not info:
+        return set()
+    return {str(x) for x in info if x and isinstance(x, (str, int)) and str(x).strip()}
+
+
 def is_target_friend(name, cfg, target_ids):
-    """判断是不是「我要自动回复的好友」：白名单 或 抖音好友接口缓存里的目标短ID。"""
+    """判断是不是「我要自动回复的好友」：白名单昵称、续火花目标短ID、或额外授权的 ID。"""
     if name_matches(name, cfg.get("whitelist")):
         return True
-    info = userIDDict.get(name)
-    if info and str(info[0]) in target_ids:
+    ids = friend_ids(name)
+    if ids & {str(t) for t in target_ids}:
+        return True
+    extra = {str(x).strip() for x in (cfg.get("extraFriendIds") or []) if str(x).strip()}
+    if ids & extra:
         return True
     return False
 
@@ -731,8 +748,12 @@ def scan_once(page, cfg, state, targets=None, inspect=False):
         is_sticker = bool(text) and len(text) <= 4 and all(not ch.isalnum() for ch in text)
         scene = classify_scene(text, has_link, is_sticker, conv_name=name)
         identity = name
-        if cfg.get("onlyKnownFriends", True) and not is_target_friend(name, cfg, target_ids):
-            logger.info(f"自动回复：跳过「{name}」——不在目标好友名单里（把昵称加进 whitelist 即可）")
+        target_ok = is_target_friend(name, cfg, target_ids)
+        if cfg.get("onlyKnownFriends", True) and not target_ok:
+            logger.info(
+                f"自动回复：跳过「{name}」——不在授权好友名单里"
+                f"（把昵称加进 whitelist，或把 ID 加进 extraFriendIds）"
+            )
             record_history({"friend": name, "scene": scene, "incoming": text[:80],
                             "action": "skip", "reason": "非目标好友"})
             stats["skipped"] += 1
@@ -741,7 +762,7 @@ def scan_once(page, cfg, state, targets=None, inspect=False):
             continue
         # 标记这条已处理，避免同一句话下一轮又被重复判断
         mark_handled(state, name, text)
-        ok, reason = check_safety(identity, name, scene, text, cfg, state)
+        ok, reason = check_safety(identity, name, scene, text, cfg, state, target_ok=target_ok)
         if ok and not is_recent(conv.get("time"), cfg.get("recentMinutes")):
             ok, reason = False, f"最近一条消息是「{conv.get('time')}」，超过 {cfg.get('recentMinutes')} 分钟，不翻旧账"
         if not ok:

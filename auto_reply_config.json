@@ -28,6 +28,9 @@
   ],
   "blacklist": [],
   "onlyKnownFriends": true,
+  "extraFriendIds": [
+    "66467852015"
+  ],
   "nameBlocklist": [
     "群",
     "粉丝团",
