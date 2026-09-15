@@ -407,7 +407,13 @@ def is_candidate(conv, cfg, state, ours, target_ids):
     if not preview:
         return False, "没有预览内容"
     for o in ours:
-        if o and (o in preview or preview in o):
+        if not o:
+            continue
+        # 我们发的内容出现在预览里 = 最后一条是我们发的
+        if o in preview:
+            return False, "最后一条是我们自己发的"
+        # 预览短（≤5 字，如「？」「嗯」）时容易和我们消息里的某个字撞上，必须要求预览足够长才做包含判断
+        if len(preview) >= 6 and preview in o:
             return False, "最后一条是我们自己发的"
     if f"{name}|{preview[:40]}" in (state.get("handledKeys") or []):
         return False, "这条消息已经处理过了"

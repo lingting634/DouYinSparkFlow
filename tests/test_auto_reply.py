@@ -226,6 +226,17 @@ ok, why = ar.check_safety("fV", "飞雪 初代 粉丝群", "group", "大家好",
 check("关闭限制后群聊仍然不回", ok is False, why)
 
 print()
+print("【用例 15】短预览（「？」「嗯」）不能被误判成自己发的")
+ours_set = {"[盖瑞]今日火花[加一]\n—— [右边] 每日一言 [左边] ——\n你害怕黑夜吗？未知是人类恐惧的根本。"}
+conv = {"name": "段义飞", "unread": 0, "time": "刚刚", "preview": "？"}
+ok, why = ar.is_candidate(conv, cfg({"whitelist": ["段义飞"]}), fresh_state(), ours_set, {"1"})
+check("「？」应被当作对方消息处理", ok is True, why)
+conv2 = {"name": "段义飞", "unread": 0, "time": "刚刚",
+         "preview": "[盖瑞]今日火花[加一]\n—— [右边] 每日一言 [左边] ——"}
+ok, why = ar.is_candidate(conv2, cfg({"whitelist": ["段义飞"]}), fresh_state(), ours_set, {"1"})
+check("我们自己的火花消息仍然排除", ok is False, why)
+
+print()
 print("=" * 66)
 if FAILURES:
     print(f"结果：{len(FAILURES)} 项失败 -> {FAILURES}")
