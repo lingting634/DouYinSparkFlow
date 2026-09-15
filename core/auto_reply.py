@@ -301,9 +301,9 @@ def check_safety(identity, friend_name, scene, text, cfg, state, now_ts=None):
     key = str(identity)
     black = [str(x) for x in cfg.get("blacklist", [])]
     white = [str(x) for x in cfg.get("whitelist", [])]
-    if key in black or friend_name in black:
+    if name_matches(friend_name, black) or key in black:
         return False, "命中黑名单"
-    if white and key not in white and friend_name not in white:
+    if white and not name_matches(friend_name, white) and key not in white:
         return False, "不在白名单内"
     for w in cfg.get("sensitiveWords", []):
         if w and w in (text or ""):
@@ -639,15 +639,20 @@ def pick_incoming(messages, our_texts):
 
 
 def our_recent_texts(targets=None, limit=3):
-    """我们发出去过的文本（用于区分对方消息）；取自 sparks 模板与上一次自动回复。"""
-    texts = set()
+    """我们发出去过的文本特征（用于识别「最后一条是自己发的」，别把自己的消息当对方消息回）。
+
+    除了实时生成的模板，还写死几个固定标记：即使生成模板失败（比如一言接口不通），
+    也不会把自己的火花消息误判成对方消息。
+    """
+    texts = {"[盖瑞]今日火花", "[续火花]", "每日一言"}
     try:
         from core.msg_builder import build_message
 
-        texts.add(build_message().strip())
-        texts.add(build_message().strip().splitlines()[0])
-    except Exception:
-        pass
+        msg = build_message().strip()
+        texts.add(msg)
+        texts.add(msg.splitlines()[0])
+    except Exception as e:
+        logger.warning(f"自动回复：预取消息模板失败（不影响识别固定标记）：{e}")
     try:
         state = load_state()
         for v in state.get("lastReplies", {}).values():

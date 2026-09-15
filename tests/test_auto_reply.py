@@ -173,6 +173,17 @@ check("昨天 -> 算旧", ar.is_recent("昨天", 10, now) is False, "")
 check("时间串缺失 -> 不拦", ar.is_recent("", 10, now) is True, "")
 
 print()
+print("【用例 11】带后缀的备注名与「自己发的消息」识别")
+check("「孙浩楠（保定）」能被「孙浩楠」匹配到",
+      ar.name_matches("孙浩楠（保定）", ["孙浩楠"]) is True, "")
+check("不相关昵称不会被误匹配", ar.name_matches("李四", ["孙浩楠"]) is False, "")
+ok, why = ar.check_safety("孙浩楠（保定）", "孙浩楠（保定）", "chat", "你好",
+                         cfg({"whitelist": ["孙浩楠"]}), fresh_state())
+check("白名单支持带后缀备注名", ok is True, why)
+ours = ar.our_recent_texts()
+check("固定标记含自己的火花消息", "[盖瑞]今日火花" in ours and "[续火花]" in ours, str(sorted(ours))[:60])
+
+print()
 print("=" * 66)
 if FAILURES:
     print(f"结果：{len(FAILURES)} 项失败 -> {FAILURES}")
